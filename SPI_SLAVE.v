@@ -18,7 +18,7 @@ module SPI_SLAVE #(
 );
     reg [2:0] cs,ns;
     reg [3:0] counter_10_cycle, MISO_counter;
-    reg [7:0] wr_address,rd_address;
+    reg [9:0] wr_address,rd_address;
     reg read_state; //if 0 --> read address, if 1 --> read data
     reg rx_finished;//if 0, if  1
     reg [7:0] tx_data_hold;
@@ -53,7 +53,7 @@ module SPI_SLAVE #(
         READ_ADD:
         if(SS_n == 0 && counter_10_cycle <10)
             ns = READ_ADD;
-        else if(SS_n == 1)
+        else if(SS_n == 1)  
             ns = IDLE;
 
         READ_DATA:
@@ -71,6 +71,7 @@ module SPI_SLAVE #(
             cs <= IDLE;
             wr_address <= 'b0;
             rd_address <= 'b0;
+            counter_10_cycle <= 0;
         end
         else begin
             case(cs)
@@ -80,8 +81,12 @@ module SPI_SLAVE #(
                     wr_address <= (wr_address << 1) | MOSI;
                     counter_10_cycle <= counter_10_cycle +1;
                 end
-                else
+                else if(counter_10_cycle == 10)begin
                     cs <= ns;
+                    counter_10_cycle <= 0;
+                end
+                    
+
             end
             READ_ADD:begin
                 if(counter_10_cycle<10) begin
@@ -89,8 +94,10 @@ module SPI_SLAVE #(
                     rd_address <= (rd_address << 1) | MOSI;
                     counter_10_cycle <= counter_10_cycle +1;
                 end
-                else
+                else if(counter_10_cycle == 10)begin
                     cs <= ns;
+                    counter_10_cycle <= 0;
+                end
             end
             READ_DATA:begin
                 if(counter_10_cycle<10) begin
@@ -99,8 +106,10 @@ module SPI_SLAVE #(
                     counter_10_cycle <= counter_10_cycle +1;
                 end
                 
-                else
+                else if(counter_10_cycle == 10)begin
                     cs <= ns;
+                    counter_10_cycle <= 0;
+                end
                 if(tx_valid) begin
                         tx_data_hold <= tx_data;
                 end
@@ -121,25 +130,42 @@ module SPI_SLAVE #(
             end
                 
             CHK_CMD:begin
-                counter_10_cycle <= 0;
+                //counter_10_cycle <= 0;
                 rx_valid <= 0;
             end
                 
             WRITE:begin
                 if((~SS_n) && counter_10_cycle == 10)begin
-                    counter_10_cycle <= 0;
-                    rx_data <= wr_address;
-                    rx_valid <= 1;
+                    if(wr_address[9:8] == 2'b00 || wr_address[9:8] == 2'b01) begin //opcode of write addr/data in RAM
+                        //counter_10_cycle <= 0;
+                        rx_data <= wr_address;
+                        rx_valid <= 1;
+                    end
+                    else begin
+                        //counter_10_cycle <= 0;/////////////////
+                        rx_data <= wr_address;
+                        rx_valid <= 0;
+                    end
+                    
                 end
             end
 
             READ_ADD:begin
                 //read_state = 0;
                 if((~SS_n) && counter_10_cycle == 10)begin
-                    counter_10_cycle <= 0;
-                    rx_data <= rd_address;
-                    rx_valid <= 1;
-                    read_state <= 1;
+                    if (wr_address[9:8] == 2'b10) begin //opcode of read addr in RAM 
+                        //counter_10_cycle <= 0;
+                        rx_data <= rd_address;
+                        rx_valid <= 1;
+                        read_state <= 1;
+                    end
+                    else begin
+                        //counter_10_cycle <= 0;//safar l counter w ebda2 ml awel
+                        rx_data <= rd_address;//t2reban hn5tag nms7 l satr dah
+                        rx_valid <= 0;
+                        read_state <= 0;
+                    end
+                    
                 end
                 else
                     read_state <= 0;
@@ -149,20 +175,32 @@ module SPI_SLAVE #(
             
                 
                 if((~SS_n) && counter_10_cycle == 10)begin
-                    counter_10_cycle <= 0;
-                    rx_data <= rd_address;
-                    rx_valid <= 1;
+                    if(rd_address[9:8] ==2'b11)begin
+                        //counter_10_cycle <= 0;
+                        rx_data <= rd_address;
+                        rx_valid <= 1;
 
-                    rx_finished <= 1;
-                    //read_state = 0;
-                    MISO_counter <= 0;
+                        rx_finished <= 1;
+                        //read_state = 0;
+                        MISO_counter <= 0; 
+                    end
+                    else begin
+                        //counter_10_cycle <= 0;
+                        rx_data <= rd_address;
+                        rx_valid <= 0;
+
+                        rx_finished <= 0;
+                        //read_state = 0;
+                        //MISO_counter <= 0;
+                    end
+                    
                 end
                 
                 
-                if(rx_finished) begin
+                else if(rx_finished) begin
                     if(MISO_counter<8) begin
-                        MISO <= tx_data_hold[7];
-                        tx_data_hold <= tx_data_hold << 1;
+                        MISO <= tx_data_hold[MISO_counter];
+                        //tx_data_hold <= tx_data_hold << 1;
                         MISO_counter <= MISO_counter + 1;
                     end
                     else if (MISO_counter == 8) begin
