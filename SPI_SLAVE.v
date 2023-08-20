@@ -19,8 +19,8 @@ module SPI_SLAVE #(
     reg [2:0] cs,ns;
     reg [3:0] counter_10_cycle, MISO_counter;
     reg [9:0] wr_address,rd_address;
-    reg read_state; //if 0 --> read address, if 1 --> read data
-    reg rx_finished;//if 0, if  1
+    reg read_state = 1'b0; //if 0 --> read address, if 1 --> read data
+    reg rx_finished = 1'b0;//if 0, if  1
     reg [7:0] tx_data_hold;
     //next case logic
     always @(cs,SS_n,MOSI,read_state,counter_10_cycle) begin
@@ -36,7 +36,7 @@ module SPI_SLAVE #(
             else if(SS_n ==0 && MOSI == 1)begin //read
                 if(~read_state)
                     ns = READ_ADD;
-                else
+                else if(read_state)
                     ns = READ_DATA;
             end
             else if (SS_n) begin
@@ -81,7 +81,7 @@ module SPI_SLAVE #(
                     wr_address <= (wr_address << 1) | MOSI;
                     counter_10_cycle <= counter_10_cycle +1;
                 end
-                else if(counter_10_cycle == 10)begin
+                else if(SS_n==1 && counter_10_cycle == 10)begin //SS_n was added to not reset the counter, therefore remain in the same state
                     cs <= ns;
                     counter_10_cycle <= 0;
                 end
@@ -94,7 +94,7 @@ module SPI_SLAVE #(
                     rd_address <= (rd_address << 1) | MOSI;
                     counter_10_cycle <= counter_10_cycle +1;
                 end
-                else if(counter_10_cycle == 10)begin
+                else if(SS_n==1 && counter_10_cycle == 10)begin
                     cs <= ns;
                     counter_10_cycle <= 0;
                 end
@@ -106,7 +106,7 @@ module SPI_SLAVE #(
                     counter_10_cycle <= counter_10_cycle +1;
                 end
                 
-                else if(counter_10_cycle == 10)begin
+                else if(SS_n==1 && counter_10_cycle == 10)begin
                     cs <= ns;
                     counter_10_cycle <= 0;
                 end
@@ -153,7 +153,7 @@ module SPI_SLAVE #(
             READ_ADD:begin
                 //read_state = 0;
                 if((~SS_n) && counter_10_cycle == 10)begin
-                    if (wr_address[9:8] == 2'b10) begin //opcode of read addr in RAM 
+                    if (rd_address[9:8] == 2'b10) begin //opcode of read addr in RAM 
                         //counter_10_cycle <= 0;
                         rx_data <= rd_address;
                         rx_valid <= 1;
@@ -167,33 +167,34 @@ module SPI_SLAVE #(
                     end
                     
                 end
-                else
-                    read_state <= 0;
+                /*else
+                    read_state <= 0;*/
             end
 
             READ_DATA:begin
             
-                
-                if((~SS_n) && counter_10_cycle == 10)begin
-                    if(rd_address[9:8] ==2'b11)begin
-                        //counter_10_cycle <= 0;
-                        rx_data <= rd_address;
-                        rx_valid <= 1;
+                if(~rx_finished) begin
+                    if((~SS_n) && counter_10_cycle == 10)begin
+                        if(rd_address[9:8] ==2'b11)begin
+                            //counter_10_cycle <= 0;
+                            rx_data <= rd_address;
+                            rx_valid <= 1;
 
-                        rx_finished <= 1;
-                        //read_state = 0;
-                        MISO_counter <= 0; 
-                    end
-                    else begin
-                        //counter_10_cycle <= 0;
-                        rx_data <= rd_address;
-                        rx_valid <= 0;
+                            rx_finished <= 1;
+                            //read_state = 0;
+                            MISO_counter <= 0; 
+                        end
+                        else begin
+                            //counter_10_cycle <= 0;
+                            rx_data <= rd_address;
+                            rx_valid <= 0;
 
-                        rx_finished <= 0;
-                        //read_state = 0;
-                        //MISO_counter <= 0;
+                            rx_finished <= 0;
+                            //read_state = 0;
+                            //MISO_counter <= 0;
+                        end
+                        
                     end
-                    
                 end
                 
                 
