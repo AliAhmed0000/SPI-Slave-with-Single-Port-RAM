@@ -22,6 +22,7 @@ module SPI_SLAVE #(
     reg read_state = 1'b0; //if 0 --> read address, if 1 --> read data
     reg rx_finished = 1'b0;//if 0, if  1
     reg [7:0] tx_data_hold;
+    reg data_hold_full;//if 0 --> useless data, if 1 --> useful data, then we can increment MISO
     //next case logic
     always @(cs,SS_n,MOSI,read_state,counter_10_cycle) begin
         case(cs)
@@ -89,6 +90,7 @@ module SPI_SLAVE #(
 
             end
             READ_ADD:begin
+                data_hold_full <= 0;
                 if(counter_10_cycle<10) begin
                     cs <= READ_ADD;
                     rd_address <= (rd_address << 1) | MOSI;
@@ -112,6 +114,7 @@ module SPI_SLAVE #(
                 end
                 if(tx_valid) begin
                         tx_data_hold <= tx_data;
+                        data_hold_full <= 1;
                 end
             end
             default:cs <= ns;
@@ -200,9 +203,11 @@ module SPI_SLAVE #(
                 
                 else if(rx_finished) begin
                     if(MISO_counter<8) begin
-                        MISO <= tx_data_hold[MISO_counter];
-                        //tx_data_hold <= tx_data_hold << 1;
-                        MISO_counter <= MISO_counter + 1;
+                        if(data_hold_full) begin
+                            MISO <= tx_data_hold[MISO_counter];
+                            //tx_data_hold <= tx_data_hold << 1;
+                            MISO_counter <= MISO_counter + 1;
+                        end
                     end
                     else if (MISO_counter == 8) begin
                         MISO_counter <= 0;
