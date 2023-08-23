@@ -1,9 +1,9 @@
 module SPI_SLAVE #(
-    parameter IDLE      = 'b000,
-    parameter CHK_CMD   = 'b001,
-    parameter WRITE     = 'b010,
-    parameter READ_ADD  = 'b011,
-    parameter READ_DATA = 'b100
+    parameter IDLE      = 3'b000,
+    parameter CHK_CMD   = 3'b001,
+    parameter WRITE     = 3'b010,
+    parameter READ_ADD  = 3'b011,
+    parameter READ_DATA = 3'b100
 ) (
     input MOSI,
     input[7:0] tx_data,
@@ -16,13 +16,76 @@ module SPI_SLAVE #(
 
     
 );
-    reg [2:0] cs,ns;
-    reg [3:0] counter_10_cycle, MISO_counter;
-    reg [9:0] wr_address,rd_address;
-    reg read_state = 1'b0; //if 0 --> read address, if 1 --> read data
-    reg rx_finished = 1'b0;//if 0, if  1
-    reg [7:0] tx_data_hold;
+    
+    reg [3:0] counter_10_cycle, MISO_counter;//counter_10_cycle if for the transmitting commands to RAM, MISO_counter is for transmission to MASTER (through MISO) 
+    reg [9:0] wr_address,rd_address;//wr_address is to hold "opcode + addr/data" when in Write state, rd_address is to hold "opcode + addr" when in read addr/data state 
+    reg read_state = 1'b0; //if 0 -->ns will be read address state, if 1 -->ns will be read data
+    reg rx_finished = 1'b0;//if 0 --> read data cmd is not sent yet, if  1 --> read data cmd is fully sent (and the MISO transmision is in progress)
+    reg [7:0] tx_data_hold;// to store data from tx_data when tx_valid is set and cs is READ_DATA
     reg data_hold_full;//if 0 --> useless data, if 1 --> useful data, then we can increment MISO
+    (* fsm_encoding = "gray" *)
+    reg [2:0] cs,ns;
+    //state memory
+        always @(posedge clk or negedge rst_n) begin
+            if(~rst_n)begin
+                cs <= IDLE;
+                wr_address <= 'b0;
+                rd_address <= 'b0;
+                counter_10_cycle <= 0;
+            end
+            else begin
+                case(cs)
+                IDLE:begin
+                    wr_address <= 'b0;
+                    rd_address <= 'b0;
+                    cs <= ns;
+                    tx_data_hold <= 0;
+                end
+                WRITE:begin //for write addr/data
+                    if(counter_10_cycle<10) begin 
+                        cs <= WRITE;
+                        wr_address <= (wr_address << 1) | MOSI;
+                        counter_10_cycle <= counter_10_cycle +1;
+                    end
+                    else if(SS_n==1 && counter_10_cycle == 10)begin //SS_n was added to not reset the counter, therefore remain in the same state
+                        cs <= ns;
+                        counter_10_cycle <= 0;
+                    end
+                        
+    
+                end
+                READ_ADD:begin
+                    data_hold_full <= 0;
+                    if(counter_10_cycle<10) begin
+                        cs <= READ_ADD;
+                        rd_address <= (rd_address << 1) | MOSI;
+                        counter_10_cycle <= counter_10_cycle +1;
+                    end
+                    else if(SS_n==1 && counter_10_cycle == 10)begin
+                        cs <= ns;
+                        counter_10_cycle <= 0;
+                    end
+                end
+                READ_DATA:begin
+                    if(counter_10_cycle<10) begin
+                        cs <= READ_DATA;
+                        rd_address <= (rd_address << 1) | MOSI;
+                        counter_10_cycle <= counter_10_cycle +1;
+                    end
+                    
+                    else if(SS_n==1 && counter_10_cycle == 10)begin
+                        cs <= ns;
+                        counter_10_cycle <= 0;
+                    end
+                    if(tx_valid) begin
+                            tx_data_hold <= tx_data;
+                            data_hold_full <= 1;
+                    end
+                end
+                default:cs <= ns;
+                endcase
+            end
+        end
     //next case logic
     always @(cs,SS_n,MOSI,read_state,counter_10_cycle) begin
         case(cs)
@@ -62,69 +125,18 @@ module SPI_SLAVE #(
             ns = READ_DATA;
         else if(SS_n == 1)
             ns = IDLE;
+
+        default : ns = IDLE;
         endcase
 
         
     end
-    //state memory
-    always @(posedge clk or negedge rst_n) begin
-        if(~rst_n)begin
-            cs <= IDLE;
-            wr_address <= 'b0;
-            rd_address <= 'b0;
-            counter_10_cycle <= 0;
-        end
-        else begin
-            case(cs)
-            WRITE:begin //for write addr/data
-                if(counter_10_cycle<10) begin 
-                    cs <= WRITE;
-                    wr_address <= (wr_address << 1) | MOSI;
-                    counter_10_cycle <= counter_10_cycle +1;
-                end
-                else if(SS_n==1 && counter_10_cycle == 10)begin //SS_n was added to not reset the counter, therefore remain in the same state
-                    cs <= ns;
-                    counter_10_cycle <= 0;
-                end
-                    
-
-            end
-            READ_ADD:begin
-                data_hold_full <= 0;
-                if(counter_10_cycle<10) begin
-                    cs <= READ_ADD;
-                    rd_address <= (rd_address << 1) | MOSI;
-                    counter_10_cycle <= counter_10_cycle +1;
-                end
-                else if(SS_n==1 && counter_10_cycle == 10)begin
-                    cs <= ns;
-                    counter_10_cycle <= 0;
-                end
-            end
-            READ_DATA:begin
-                if(counter_10_cycle<10) begin
-                    cs <= READ_DATA;
-                    rd_address <= (rd_address << 1) | MOSI;
-                    counter_10_cycle <= counter_10_cycle +1;
-                end
-                
-                else if(SS_n==1 && counter_10_cycle == 10)begin
-                    cs <= ns;
-                    counter_10_cycle <= 0;
-                end
-                if(tx_valid) begin
-                        tx_data_hold <= tx_data;
-                        data_hold_full <= 1;
-                end
-            end
-            default:cs <= ns;
-            endcase
-        end
+    
 
         
 
         
-    end
+
     //output logic
     always @(posedge clk) begin
         case (cs)
@@ -144,7 +156,7 @@ module SPI_SLAVE #(
                         rx_data <= wr_address;
                         rx_valid <= 1;
                     end
-                    else begin
+                    else begin //if it's not the right opcode, rx_data is not valid
                         //counter_10_cycle <= 0;/////////////////
                         rx_data <= wr_address;
                         rx_valid <= 0;
@@ -163,10 +175,10 @@ module SPI_SLAVE #(
                         read_state <= 1;
                     end
                     else begin
-                        //counter_10_cycle <= 0;//safar l counter w ebda2 ml awel
-                        rx_data <= rd_address;//t2reban hn5tag nms7 l satr dah
-                        rx_valid <= 0;
-                        read_state <= 0;
+                        //counter_10_cycle <= 0;//safar l counter w ebda2 ml awel//caused multiple driver error (cuz it can't be drived from 2 different blocks)
+                        rx_data <= rd_address;
+                        rx_valid <= 0;//rx_data is not valid
+                        read_state <= 0;//ns won't change to READ_DATA as long as the opcode is not correct
                     end
                     
                 end
